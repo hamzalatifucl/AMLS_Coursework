@@ -3,5 +3,5 @@ import matplotlib.pyplot as plt
 from medmnist import BloodMNIST
 
 #Load data
-dataset = BloodMNIST(split="val", download=True, size=64)
+dataset = BloodMNIST(split="train", download=True, size=64)
 
