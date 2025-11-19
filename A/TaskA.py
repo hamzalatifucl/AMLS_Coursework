@@ -49,12 +49,13 @@ def dataset_to_arrays(dataset):
     return np.vstack(images), np.array(labels)
 
 
-def train_linear_svc(dataset):
+def train_linear_svc(dataset, C=1.0, max_iter=10000):
+    """Train a Linear SVC model with configurable hyperparameters."""
     X, y = dataset_to_arrays(dataset)
     model = LinearSVC(
-        C=1.0,
+        C=C,
         class_weight="balanced",
-        max_iter=546,
+        max_iter=max_iter,
         dual=False,
         random_state=0,
     )
@@ -62,6 +63,7 @@ def train_linear_svc(dataset):
     preds = model.predict(X)
     accuracy = accuracy_score(y, preds)
     print(f"\nTrained Linear SVC on {len(y)} samples.")
+    print(f"  C={C}, max_iter={max_iter}")
     print(f"Training accuracy (same data): {accuracy:.4f}")
     return model
 
@@ -73,6 +75,45 @@ def evaluate_model(model, validation_dataset):
     print(f"\nValidation Accuracy: {accuracy:.4f}")
     print(f"Evaluated on {len(y_val)} validation samples.")
     return accuracy
+
+#  Testing different C values and comparing validation accuracies.
+def test_C_values(training_dataset, validation_dataset, C_values=[0.2, 0.3, 0.25]):
+    print("Testing different C values")
+    
+    results = []
+    X_train, y_train = dataset_to_arrays(training_dataset)
+    X_val, y_val = dataset_to_arrays(validation_dataset)
+    
+    for C in C_values:
+        print(f"\nTesting C={C}...")
+        model = LinearSVC(
+            C=C,
+            class_weight="balanced",
+            max_iter= 10000,
+            dual=False,
+            random_state=0,
+        )
+        model.fit(X_train, y_train)
+        
+        val_preds = model.predict(X_val)
+        val_acc = accuracy_score(y_val, val_preds)
+        
+        results.append({
+            'C': C,
+            'val_acc': val_acc
+        })
+        
+        print(f"  Validation accuracy: {val_acc:.4f}")
+    
+    print("Summary of Results:")
+    print(f"{'C'} {'Val Acc'}")
+    for r in results:
+        print(f"{r['C']} {r['val_acc']:.4f}")
+    
+    best_result = max(results, key=lambda x: x['val_acc'])
+    print(f"\nBest C value: {best_result['C']} (Validation Accuracy: {best_result['val_acc']:.4f})")
+    
+    return results, best_result
 
 
 # Output information about loaded data
@@ -90,8 +131,14 @@ if __name__ == "__main__":
     #print("\nDisplaying sample images...")
     #display_sample_images(dataset, num_samples=8)
 
-    #print("\nFitting Linear SVC model on the training dataset...")
-    model = train_linear_svc(training_dataset)
+    # Training with C=1.0
+    model = train_linear_svc(training_dataset, C=1.0, max_iter=10000)
     
     print("\nEvaluating model on validation dataset...")
     evaluate_model(model, validation_dataset)
+    
+    # Test different hyperparameter values
+    print("# results, best = test_C_values(training_dataset, validation_dataset)")
+    
+    # Test different C values
+    results, best = test_C_values(training_dataset, validation_dataset)
