@@ -1,41 +1,13 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score
 from sklearn.svm import LinearSVC
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from medmnist import BreastMNIST
 
 # Load data
 dataset = training_dataset = BreastMNIST(split="train", download=True, size=64)
 validation_dataset = BreastMNIST(split="val", download=True, size=64)
-
-
-def display_sample_images(dataset, num_samples=8):
-    class_names = dataset.info.get('label', {})
-    fig, axes = plt.subplots(2, 4, figsize=(12, 6))
-    axes = axes.flatten()
-    indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
-    for idx, ax in enumerate(axes):
-        if idx < len(indices):
-            sample_idx = indices[idx]
-            image, label = dataset[sample_idx]
-            if hasattr(image, 'numpy'):
-                image = image.numpy()
-            elif not isinstance(image, np.ndarray):
-                image = np.array(image)
-            if len(image.shape) == 3:
-                image = image.squeeze(0)  
-            ax.imshow(image, cmap='grey')  # Greyscale
-
-            label_val = label.item() if hasattr(label, 'item') else int(label)
-            class_name = class_names.get(str(label_val), f"Class {label_val}")
-            ax.set_title(f"Label: {class_name}\n({label_val})", fontsize=10)
-            ax.axis('off')
-        else:
-            ax.axis('off')
-
-    plt.suptitle('BreastMNIST - Sample Images', fontsize=14, y=1.02)
-    plt.tight_layout()
-    plt.show()
 
 
 def dataset_to_arrays(dataset):
@@ -67,8 +39,9 @@ def train_linear_svc(dataset, C=1.0, max_iter=10000):
     print(f"Training accuracy (same data): {accuracy:.4f}")
     return model
 
-# Testing on validation dataset
+
 def evaluate_model(model, validation_dataset):
+    """Evaluate model on validation dataset."""
     X_val, y_val = dataset_to_arrays(validation_dataset)
     preds = model.predict(X_val)
     accuracy = accuracy_score(y_val, preds)
@@ -76,69 +49,81 @@ def evaluate_model(model, validation_dataset):
     print(f"Evaluated on {len(y_val)} validation samples.")
     return accuracy
 
-#  Testing different C values and comparing validation accuracies.
-def test_C_values(training_dataset, validation_dataset, C_values=[0.2, 0.3, 0.25]):
-    print("Testing different C values")
-    
-    results = []
+
+def train_with_pca(training_dataset, validation_dataset, n_components=151, C=0.2):
+    """Train model with PCA dimensionality reduction."""
     X_train, y_train = dataset_to_arrays(training_dataset)
     X_val, y_val = dataset_to_arrays(validation_dataset)
     
-    for C in C_values:
-        print(f"\nTesting C={C}...")
-        model = LinearSVC(
-            C=C,
-            class_weight="balanced",
-            max_iter= 10000,
-            dual=False,
-            random_state=0,
-        )
-        model.fit(X_train, y_train)
-        
-        val_preds = model.predict(X_val)
-        val_acc = accuracy_score(y_val, val_preds)
-        
-        results.append({
-            'C': C,
-            'val_acc': val_acc
-        })
-        
-        print(f"  Validation accuracy: {val_acc:.4f}")
+    # Standardize features before PCA
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
     
-    print("Summary of Results:")
-    print(f"{'C'} {'Val Acc'}")
-    for r in results:
-        print(f"{r['C']} {r['val_acc']:.4f}")
+    # Find how many components are needed for 95% variance
+    # print("Finding Components Needed for 95% Variance")
+    # pca_full = PCA()
+    # pca_full.fit(X_train_scaled)
+    # cumsum = pca_full.explained_variance_ratio_.cumsum()
+    # d = np.argmax(cumsum >= 0.95) + 1
+    # print(f"You need {d} components to keep 95% of the image details.")
     
-    best_result = max(results, key=lambda x: x['val_acc'])
-    print(f"\nBest C value: {best_result['C']} (Validation Accuracy: {best_result['val_acc']:.4f})")
+    # PCA with 151 components
+    pca = PCA(151)
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_val_pca = pca.transform(X_val_scaled)
     
-    return results, best_result
+    explained_var = pca.explained_variance_ratio_.sum()
+    print(f"\nUsing 151 PCA components")
+    print(f"Explained variance: {explained_var*100:.2f}%")
+    print(f"Reduced from 4096 to 151 features")
+    
+    # Train model
+    model = LinearSVC(C=C, class_weight="balanced", max_iter=10000, dual=False, random_state=0)
+    model.fit(X_train_pca, y_train)
+    
+    # Evaluate model
+    train_preds = model.predict(X_train_pca)
+    val_preds = model.predict(X_val_pca)
+    
+    train_acc = accuracy_score(y_train, train_preds)
+    val_acc = accuracy_score(y_val, val_preds)
+    gap = train_acc - val_acc
+    
+    print(f"\nPCA Model Results:")
+    print(f"  Training Accuracy:   {train_acc:.4f} ({train_acc*100:.2f}%)")
+    print(f"  Validation Accuracy: {val_acc:.4f} ({val_acc*100:.2f}%)")
+    print(f"  Gap:                 {gap:.4f} ({gap*100:.2f}%)")
+    
+    return model, scaler, pca, train_acc, val_acc, gap
 
 
-# Output information about loaded data
+# Main execution
 if __name__ == "__main__":
-    print(f"Training dataset size: {len(dataset)} samples")
-    print(f"  Description: {dataset.info.get('description', 'N/A')}")
-    print(f"  Task type: {dataset.info.get('task', 'N/A')}")
-    print(f"  Number of channels: {dataset.info.get('n_channels', 'N/A')}")
-    print(f"  Classes: {dataset.info.get('label', {})}")
-    print(f"  Image size: 64x64 pixels")
-    print(f"\nData split: Validation set")
-    print(f"Total samples in validation set: {len(validation_dataset)}")
+    # print(f"Training dataset size: {len(dataset)} samples")
+    # print(f"  Description: {dataset.info.get('description', 'N/A')}")
+    # print(f"  Task type: {dataset.info.get('task', 'N/A')}")
+    # print(f"  Number of channels: {dataset.info.get('n_channels', 'N/A')}")
+    # print(f"  Classes: {dataset.info.get('label', {})}")
+    # print(f"  Image size: 64x64 pixels")
+    # print(f"\nData split: Validation set")
+    # print(f"Total samples in validation set: {len(validation_dataset)}")
     
-    # Display sample images
-    #print("\nDisplaying sample images...")
-    #display_sample_images(dataset, num_samples=8)
+    # Train original model (4096 features)
+    print("Training Original Model (4096 features)")
+    model_original = train_linear_svc(training_dataset, C=1.0, max_iter=10000)
+    original_val_acc = evaluate_model(model_original, validation_dataset)
+    
+    # Train model with PCA (151 components)
+    print("Training Model with PCA (151 components)")
+    model_pca, scaler, pca, pca_train_acc, pca_val_acc, pca_gap = train_with_pca(
+        training_dataset, validation_dataset, n_components=151, C=0.2
+    )
+    
+    # Compare original vs PCA
+    print("Comparison: Original vs PCA")
+    print(f"{'Model':<30} {'Train Acc':<12} {'Val Acc':<12} {'Gap':<10}")
+    print(f"{'Original (4096 features)':<30} {1.0000:<12.4f} {original_val_acc:<12.4f} {1.0000 - original_val_acc:<10.4f}")
+    print(f"{'PCA (151 components)':<30} {pca_train_acc:<12.4f} {pca_val_acc:<12.4f} {pca_gap:<10.4f}")
+    
 
-    # Training with C=1.0
-    model = train_linear_svc(training_dataset, C=1.0, max_iter=10000)
-    
-    print("\nEvaluating model on validation dataset...")
-    evaluate_model(model, validation_dataset)
-    
-    # Test different hyperparameter values
-    print("# results, best = test_C_values(training_dataset, validation_dataset)")
-    
-    # Test different C values
-    results, best = test_C_values(training_dataset, validation_dataset)
