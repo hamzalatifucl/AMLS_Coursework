@@ -1,8 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F_nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torchvision.transforms import functional as F
 from sklearn.metrics import accuracy_score
 from medmnist import BreastMNIST
 
@@ -86,12 +88,12 @@ dataset = training_dataset = BreastMNIST(split="train", download=True, size=64)
 validation_dataset = BreastMNIST(split="val", download=True, size=64)
 
 
-# NEURAL NETWORK MODEL
 
 class BreastMNISTDataset(Dataset):
-    def __init__(self, medmnist_dataset):
+    def __init__(self, medmnist_dataset, transform=None):
         self.images = []
         self.labels = []
+        self.transform = transform  # Store transform for dynamic augmentation
         
         for idx in range(len(medmnist_dataset)):
             image, label = medmnist_dataset[idx]
@@ -100,8 +102,7 @@ class BreastMNISTDataset(Dataset):
                 image = image.numpy()
             elif not isinstance(image, np.ndarray):
                 image = np.array(image)
-
-            image = image.astype(np.float32) / 255.0  # Normalize to [0, 1]
+            image = image.astype(np.float32) / 255.0  
             
             # Get label
             label_value = int(label[0]) if isinstance(label, np.ndarray) else int(label)
@@ -113,8 +114,13 @@ class BreastMNISTDataset(Dataset):
         return len(self.images)
     
     def __getitem__(self, idx):
-        image = torch.FloatTensor(self.images[idx]).unsqueeze(0)  # Add channel dimension: (1, 64, 64)
-        label = torch.LongTensor([self.labels[idx]])[0]  # Convert to tensor
+        image = torch.FloatTensor(self.images[idx]).unsqueeze(0)  # added channel dimension
+        
+        # Apply transform dynamically - each epoch will see different augmentations
+        if self.transform is not None:
+            image = self.transform(image)
+        
+        label = torch.LongTensor([self.labels[idx]])[0]  
         return image, label
 
 
@@ -122,7 +128,7 @@ class CNNClassifier(nn.Module):
     def __init__(self, num_classes=2):
         super(CNNClassifier, self).__init__()
         
-        # Convolutional layers
+        # layers
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
@@ -137,7 +143,6 @@ class CNNClassifier(nn.Module):
         self.dropout = nn.Dropout(0.5)
         
         # Fully connected layers
-        # After 3 pooling operations: 64 -> 32 -> 16 -> 8
         self.fc1 = nn.Linear(128 * 8 * 8, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, num_classes)
@@ -155,10 +160,8 @@ class CNNClassifier(nn.Module):
         # Conv block 3
         x = self.pool(self.relu(self.bn3(self.conv3(x))))
         
-        # Flatten
         x = x.view(x.size(0), -1)
         
-        # Fully connected layers
         x = self.dropout(self.relu(self.fc1(x)))
         x = self.dropout(self.relu(self.fc2(x)))
         x = self.fc3(x)
@@ -167,18 +170,8 @@ class CNNClassifier(nn.Module):
 
 
 def train_neural_network(train_loader, val_loader, num_epochs=100, learning_rate=0.001, patience=20):
-    """
-    Train neural network with early stopping.
-    
-    Parameters:
-    - train_loader: Training data loader
-    - val_loader: Validation data loader
-    - num_epochs: Maximum number of epochs (default: 100)
-    - learning_rate: Learning rate for optimizer (default: 0.001)
-    - patience: Number of epochs to wait before early stopping (default: 20)
-    """
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
     
     model = CNNClassifier(num_classes=2).to(device)
     criterion = nn.CrossEntropyLoss()
@@ -189,7 +182,7 @@ def train_neural_network(train_loader, val_loader, num_epochs=100, learning_rate
     train_accs = []
     val_accs = []
     
-    # Early stopping variables
+    # Best model tracking
     best_val_acc = 0.0
     best_train_acc = 0.0
     best_train_loss = float('inf')
@@ -242,7 +235,7 @@ def train_neural_network(train_loader, val_loader, num_epochs=100, learning_rate
         val_acc = correct_val / total_val
         val_accs.append(val_acc)
         
-        # Early stopping logic
+        # Early stopping check
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_train_acc = train_acc  # Save training accuracy at best validation
@@ -354,9 +347,38 @@ if __name__ == "__main__":
 
 
     # NEURAL NETWORK MODEL
-    # Create datasets
-    train_dataset = BreastMNISTDataset(training_dataset)
-    val_dataset = BreastMNISTDataset(validation_dataset)
+    # Define lighter data augmentation transforms for training
+    # Less aggressive augmentations suitable for medical images
+    def apply_random_rotation(img):
+        """Light rotation: ±5 degrees (conservative for medical images)"""
+        angle = np.random.uniform(-5, 5)
+        return F.rotate(img, angle, interpolation=F.InterpolationMode.BILINEAR, fill=0)
+    
+    def apply_random_translation(img):
+        """Light translation: up to 5% of image size (reduced from 10%)"""
+        max_translate = 0.05
+        tx = np.random.uniform(-max_translate, max_translate) * img.shape[-1]
+        ty = np.random.uniform(-max_translate, max_translate) * img.shape[-2]
+        
+        # Create affine transformation matrix for translation
+        theta = torch.tensor([[1, 0, tx], [0, 1, ty]], dtype=torch.float32)
+        theta = theta.unsqueeze(0)
+        grid = F_nn.affine_grid(theta, img.unsqueeze(0).shape, align_corners=False)
+        return F_nn.grid_sample(img.unsqueeze(0), grid, align_corners=False).squeeze(0)
+    
+    def dynamic_augment(img):
+        """Apply lighter augmentations with lower probability"""
+        # 30% chance for each augmentation (reduced from 50% to be less aggressive)
+        # This means most images will be lightly augmented or not augmented at all
+        if np.random.random() > 0.7:  # 30% chance to rotate
+            img = apply_random_rotation(img)
+        if np.random.random() > 0.7:  # 30% chance to translate
+            img = apply_random_translation(img)
+        return img
+    
+    # Create datasets with lighter augmentation for training, no augmentation for validation
+    train_dataset = BreastMNISTDataset(training_dataset, transform=dynamic_augment)
+    val_dataset = BreastMNISTDataset(validation_dataset, transform=None)
     
     # Create data loaders
     batch_size = 32
@@ -365,13 +387,19 @@ if __name__ == "__main__":
     
     print(f"Training batches: {len(train_loader)}")
     print(f"Validation batches: {len(val_loader)}")
+    print(f"\nData Augmentation (Less Aggressive):")
+    print(f"  Training set: Light augmentation enabled")
+    print(f"    - Random rotation: ±5 degrees (30% probability)")
+    print(f"    - Random translation: up to 5% (30% probability)")
+    print(f"    - Each epoch will see different augmentations of the same images")
+    print(f"  Validation set: No augmentation (original images)")
     
     # Train neural network
     model, train_accs, val_accs = train_neural_network(
         train_loader, val_loader, 
-        num_epochs=100, 
-        learning_rate=0.001,
-        patience=30  # Early stopping
+        num_epochs = 100, 
+        learning_rate = 0.001,
+        patience = 30  # Early stopping
     )
     
     # Final evaluation
