@@ -19,18 +19,16 @@ def apply_blur(img, sigma=0.3):
     """Apply blur"""
     if np.random.random() > 0.7:
         from scipy.ndimage import gaussian_filter
-        # Get device before converting to numpy
         device = img.device
-        # Convert to numpy (handle both 3D and 4D)
         if len(img.shape) == 4:
             img_np = img.squeeze(0).cpu().detach().numpy()
         else:
             img_np = img.cpu().detach().numpy()
         
         # Apply blur based on shape
-        if len(img_np.shape) == 3:  # (C, H, W)
+        if len(img_np.shape) == 3: 
             img_blurred = np.array([gaussian_filter(img_np[i], sigma=sigma) for i in range(img_np.shape[0])])
-        elif len(img_np.shape) == 2:  # (H, W)
+        elif len(img_np.shape) == 2:  
             img_blurred = gaussian_filter(img_np, sigma=sigma)
             img_blurred = img_blurred[np.newaxis, ...]  # Add channel dimension
         else:
@@ -38,7 +36,6 @@ def apply_blur(img, sigma=0.3):
         
         # Convert back to tensor and ensure correct shape
         result = torch.FloatTensor(img_blurred).to(device)
-        # Ensure output shape matches input exactly
         if len(img.shape) == 4 and len(result.shape) == 3:
             result = result.unsqueeze(0)
         elif len(img.shape) == 3 and len(result.shape) == 2:
