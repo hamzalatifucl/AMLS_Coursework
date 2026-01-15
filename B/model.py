@@ -13,12 +13,12 @@ class CNNClassifier(nn.Module):
         self.bn3 = nn.BatchNorm2d(conv3_filters)
         
         self.pool = nn.MaxPool2d(2, 2)
-        self.dropout_conv = nn.Dropout(0.4)  # Balanced - enough to prevent overfitting but allow learning
-        self.dropout_fc = nn.Dropout(0.5)    # Balanced - prevents overfitting without blocking learning
+        self.dropout_conv = nn.Dropout(0.4)  
+        self.dropout_fc = nn.Dropout(0.5)    
         
         self.fc1 = nn.Linear(conv3_filters * 3 * 3, fc_size)
-        self.fc2 = nn.Linear(fc_size, 128)   # Restored capacity for better learning
-        self.fc3 = nn.Linear(128, num_classes)  # Fixed: fc3 should expect 128 (output of fc2)
+        self.fc2 = nn.Linear(fc_size, 128)   
+        self.fc3 = nn.Linear(128, num_classes)  
         
         self.relu = nn.ReLU()
     
@@ -36,15 +36,15 @@ class CNNClassifier(nn.Module):
         return x
 
 
-# hyperparameters - Increased regularization to reduce overfitting
+# hyperparameters 
 DEFAULT_HYPERPARAMETERS = {
     'num_classes': 2,
     'conv1_filters': 32,
     'conv2_filters': 64,
     'conv3_filters': 128,
     'fc_size': 256,
-    'learning_rate': 0.0008,     # Balanced - fast enough to learn but slow enough to prevent memorization
-    'weight_decay': 0.0005,      # Balanced L2 regularization
+    'learning_rate': 0.0008,     
+    'weight_decay': 0.0005,     
     'num_epochs': 100,
     'batch_size': 64,
     'patience': 12               # Allows enough training for convergence
