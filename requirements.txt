@@ -1,5 +1,7 @@
 medmnist
 numpy
-pandas
 scikit-learn
+torch
+torchvision
+scipy
 matplotlib
